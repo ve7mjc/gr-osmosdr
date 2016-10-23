@@ -184,6 +184,23 @@ int bladerf_source_c::work( int noutput_items,
       _consecutive_failures = 0;
   }
 
+  if (_use_metadata) {
+    if (meta.actual_count != (unsigned int)noutput_items)
+        std::cerr << "Mismatch " << meta.actual_count << " vs " << noutput_items << std::endl;
+    if (meta.status &  BLADERF_META_STATUS_OVERRUN) {
+        std::cerr << "Overrun" << std::endl;
+        std::cerr << "TS: " << meta.timestamp << std::endl;
+	_x = true;
+	_ts = meta.timestamp + meta.actual_count;
+    }
+    else if (_x) {
+        std::cerr << "TS: " << meta.timestamp << std::endl;
+        std::cerr << "TSD: " << (meta.timestamp - _ts) << std::endl;
+	_x = false;
+    }
+    noutput_items = meta.actual_count;
+  }
+
   /* Convert them from fixed to floating point */
   volk_16i_s32f_convert_32f((float*)out, _conv_buf, scaling, 2*noutput_items);
 

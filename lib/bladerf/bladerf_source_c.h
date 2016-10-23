@@ -65,6 +65,9 @@ private:
 
   bladerf_source_c (const std::string & args);  	// private constructor
 
+  bool _x;
+  uint64_t _ts;
+
 public:
   bool start();
   bool stop();
