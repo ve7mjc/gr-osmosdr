@@ -966,3 +966,21 @@ void source_impl::set_time_unknown_pps(const osmosdr::time_spec_t &time_spec)
     dev->set_time_unknown_pps( time_spec );
   }
 }
+
+
+void source_impl::set_biast( bool enabled ) {
+  BOOST_FOREACH( source_iface *dev, _devs )
+  {
+    dev->set_biast(enabled);
+  }
+}
+
+bool source_impl::get_biast() {
+  BOOST_FOREACH( source_iface *dev, _devs )
+  {
+    if (dev->get_biast()) {
+      return true;
+    }
+  }
+  return false;
+}

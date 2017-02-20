@@ -122,6 +122,9 @@ public:
   double get_bandwidth( size_t chan = 0 );
   osmosdr::freq_range_t get_bandwidth_range( size_t chan = 0 );
 
+  void set_biast( bool enabled );
+  bool get_biast();
+
 private:
   static int _airspy_rx_callback(airspy_transfer* transfer);
   int airspy_rx_callback(void *samples, int sample_count);
@@ -148,6 +151,7 @@ private:
   double _mix_gain;
   double _vga_gain;
   double _bandwidth;
+  bool _biasT;
 };
 
 #endif /* INCLUDED_AIRSPY_SOURCE_C_H */
