@@ -1,4 +1,4 @@
-# Copyright 2013 Free Software Foundation, Inc.
+# Copyright 2012 Free Software Foundation, Inc.
 #
 # This file is part of GNU Radio
 #
@@ -23,18 +23,17 @@
 
 include_directories(
     ${CMAKE_CURRENT_SOURCE_DIR}
-    ${LIBBLADERF_INCLUDE_DIRS}
-    ${VOLK_INCLUDE_DIRS}
+    ${LIBFREESRP_INCLUDE_DIRS}
 )
 
-set(bladerf_srcs
-    ${CMAKE_CURRENT_SOURCE_DIR}/bladerf_source_c.cc
-    ${CMAKE_CURRENT_SOURCE_DIR}/bladerf_sink_c.cc
-    ${CMAKE_CURRENT_SOURCE_DIR}/bladerf_common.cc
+set(freesrp_srcs
+    ${CMAKE_CURRENT_SOURCE_DIR}/freesrp_common.cc
+    ${CMAKE_CURRENT_SOURCE_DIR}/freesrp_source_c.cc
+    ${CMAKE_CURRENT_SOURCE_DIR}/freesrp_sink_c.cc
 )
 
 ########################################################################
 # Append gnuradio-osmosdr library sources
 ########################################################################
-list(APPEND gr_osmosdr_srcs ${bladerf_srcs})
-list(APPEND gr_osmosdr_libs ${LIBBLADERF_LIBRARIES} ${VOLK_LIBRARIES})
+list(APPEND gr_osmosdr_srcs ${freesrp_srcs})
+list(APPEND gr_osmosdr_libs ${LIBFREESRP_LIBRARIES})
