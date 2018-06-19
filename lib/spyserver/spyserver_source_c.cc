@@ -73,23 +73,21 @@ spyserver_source_c::spyserver_source_c (const std::string &args)
   : gr::sync_block ("spyserver_source_c",
         gr::io_signature::make(MIN_IN, MAX_IN, sizeof (gr_complex)),
         gr::io_signature::make(MIN_OUT, MAX_OUT, sizeof (gr_complex))),
+    terminated(false),
+    streaming(false),
+    got_device_info(false),
+    receiver_thread(NULL),
+    header_data(new uint8_t[sizeof(MessageHeader)]),
+    body_buffer(NULL),
+    body_buffer_length(0),
+    parser_position(0),
+    last_sequence_number(0),
+
+    streaming_mode(STREAM_MODE_IQ_ONLY),
     _sample_rate(0),
-    _center_freq(0),
-    _freq_corr(0),
-    _auto_gain(false)
+    _center_freq(0)
 {
   dict_t dict = params_to_dict(args);
-
-  connect();
-
-  for (size_t i = 0; i < _sample_rates.size(); i++)
-    std::cerr << boost::format("%gM ") % (_sample_rates[i].first / 1e6);
-
-  set_center_freq( (get_freq_range().start() + get_freq_range().stop()) / 2.0 );
-  set_sample_rate( get_sample_rates().start() );
-  set_bandwidth( 0 );
-
-  set_lna_gain( 8 ); /* preset to a reasonable default (non-GRC use case) */
 
   if (dict.count("ip"))
   {
@@ -110,17 +108,26 @@ spyserver_source_c::spyserver_source_c (const std::string &args)
     port = 5555;
   }
 
+  std::cerr << "SpyServer(" << ip << ", " << port << ")" << std::endl;
   client = tcp_client(ip, port);
+
+  connect();
+  set_center_freq( (get_freq_range().start() + get_freq_range().stop()) / 2.0 );
+  set_sample_rate( get_sample_rates().start() );
+
+  set_lna_gain( 8 ); /* preset to a reasonable default (non-GRC use case) */
+
 
   _fifo = new boost::circular_buffer<gr_complex>(5000000);
   if (!_fifo) {
     throw std::runtime_error( std::string(__FUNCTION__) + " " +
                               "Failed to allocate a sample FIFO!" );
   }
+  std::cerr << "SpyServer: Ready" << std::endl;
 }
 
 // const std::string &spyserver_source_c::getName() {
-//   switch (deviceInfo.DeviceType) {
+//   switch (device_info.DeviceType) {
 //   case DEVICE_INVALID:
 //     return spyserver_source_c::NameNoDevice;
 //   case DEVICE_AIRSPY_ONE:
@@ -137,37 +144,37 @@ spyserver_source_c::spyserver_source_c (const std::string &args)
 void spyserver_source_c::connect()
 {
   bool hasError = false;
-  if (receiverThread != NULL) {
+  if (receiver_thread != NULL) {
     return;
   }
 
   std::cerr << "SpyServer: Trying to connect" << std::endl;
   client.connect_conn();
-  isConnected = true;
+  is_connected = true;
   std::cerr << "SpyServer: Connected" << std::endl;
 
-  sayHello();
+  say_hello();
   cleanup();
 
   terminated = false;
-  gotSyncInfo = false;
-  gotDeviceInfo = false;
+  got_sync_info = false;
+  got_device_info = false;
 
   std::exception error;
 
-  receiverThread  = new std::thread(&spyserver_source_c::threadLoop, this);
+  receiver_thread  = new std::thread(&spyserver_source_c::thread_loop, this);
 
   for (int i=0; i<1000 && !hasError; i++) {
-    if (gotDeviceInfo) {
-      if (deviceInfo.DeviceType == DEVICE_INVALID) {
+    if (got_device_info) {
+      if (device_info.DeviceType == DEVICE_INVALID) {
         error = std::runtime_error( std::string(__FUNCTION__) + " " + "Server is up but no device is available");
         hasError = true;
         break;
       }
 
-      if (gotSyncInfo) {
+      if (got_sync_info) {
         std::cerr << "SpyServer: Got sync Info" << std::endl;
-        onConnect();
+        on_connect();
         return;
       }
     }
@@ -185,36 +192,36 @@ void spyserver_source_c::connect()
 void spyserver_source_c::disconnect()
 {
   terminated = true;
-  if (isConnected) {
+  if (is_connected) {
     client.close_conn();
   }
 
-  if (receiverThread != NULL) {
-    receiverThread->join();
-    receiverThread = NULL;
+  if (receiver_thread != NULL) {
+    receiver_thread->join();
+    receiver_thread = NULL;
   }
 
   cleanup();
 }
 
 
-void spyserver_source_c::onConnect()
+void spyserver_source_c::on_connect()
 {
-  setSetting(SETTING_STREAMING_MODE, { streamingMode });
-  setSetting(SETTING_IQ_FORMAT, { STREAM_FORMAT_INT16 });
-  setSetting(SETTING_FFT_FORMAT, { STREAM_FORMAT_UINT8 });
-  //setSetting(SETTING_FFT_DISPLAY_PIXELS, { displayPixels });
-  //setSetting(SETTING_FFT_DB_OFFSET, { fftOffset });
-  //setSetting(SETTING_FFT_DB_RANGE, { fftRange });
-  //deviceInfo.MaximumSampleRate
+  set_setting(SETTING_STREAMING_MODE, { streaming_mode });
+  set_setting(SETTING_IQ_FORMAT, { STREAM_FORMAT_INT16 });
+  // set_setting(SETTING_FFT_FORMAT, { STREAM_FORMAT_UINT8 });
+  //set_setting(SETTING_FFT_DISPLAY_PIXELS, { displayPixels });
+  //set_setting(SETTING_FFT_DB_OFFSET, { fftOffset });
+  //set_setting(SETTING_FFT_DB_RANGE, { fftRange });
+  //device_info.MaximumSampleRate
   //availableSampleRates
-  for (unsigned int i=0; i<=deviceInfo.DecimationStageCount; i++) {
-    _sample_rates.push_back( std::pair<double, uint32_t>(deviceInfo.MaximumSampleRate / (double)(1 << i), i ) );
+  for (unsigned int i=0; i<=device_info.DecimationStageCount; i++) {
+    _sample_rates.push_back( std::pair<double, uint32_t>(device_info.MaximumSampleRate / (double)(1 << i), i ) );
   }
   std::sort(_sample_rates.begin(), _sample_rates.end());
 }
 
-bool spyserver_source_c::setSetting(uint32_t settingType, std::vector<uint32_t> params) {
+bool spyserver_source_c::set_setting(uint32_t settingType, std::vector<uint32_t> params) {
   std::vector<uint8_t> argBytes;
   if (params.size() > 0) {
     argBytes = std::vector<uint8_t>(sizeof(SettingType) + params.size() * sizeof(uint32_t));
@@ -228,10 +235,10 @@ bool spyserver_source_c::setSetting(uint32_t settingType, std::vector<uint32_t> 
     argBytes = std::vector<uint8_t>();
   }
 
-  return sendCommand(CMD_SET_SETTING, argBytes);
+  return send_command(CMD_SET_SETTING, argBytes);
 }
 
-bool spyserver_source_c::sayHello() {
+bool spyserver_source_c::say_hello() {
   const uint8_t *protocolVersionBytes = (const uint8_t *) &ProtocolVersion;
   const uint8_t *softwareVersionBytes = (const uint8_t *) SoftwareID.c_str();
   std::vector<uint8_t> args = std::vector<uint8_t>(sizeof(ProtocolVersion) + SoftwareID.size());
@@ -239,46 +246,46 @@ bool spyserver_source_c::sayHello() {
   std::memcpy(&args[0], protocolVersionBytes, sizeof(ProtocolVersion));
   std::memcpy(&args[0] + sizeof(ProtocolVersion), softwareVersionBytes, SoftwareID.size());
 
-  return sendCommand(CMD_HELLO, args);
+  return send_command(CMD_HELLO, args);
 }
 
 void spyserver_source_c::cleanup() {
-    deviceInfo.DeviceType = 0;
-    deviceInfo.DeviceSerial = 0;
-    deviceInfo.DecimationStageCount = 0;
-    deviceInfo.GainStageCount = 0;
-    deviceInfo.MaximumSampleRate = 0;
-    deviceInfo.MaximumBandwidth = 0;
-    deviceInfo.MaximumGainIndex = 0;
-    deviceInfo.MinimumFrequency = 0;
-    deviceInfo.MaximumFrequency = 0;
+    device_info.DeviceType = 0;
+    device_info.DeviceSerial = 0;
+    device_info.DecimationStageCount = 0;
+    device_info.GainStageCount = 0;
+    device_info.MaximumSampleRate = 0;
+    device_info.MaximumBandwidth = 0;
+    device_info.MaximumGainIndex = 0;
+    device_info.MinimumFrequency = 0;
+    device_info.MaximumFrequency = 0;
 
     gain = 0;
     //displayCenterFrequency = 0;
-    //deviceCenterFrequency = 0;
+    //device_center_frequency = 0;
     //displayDecimationStageCount = 0;
-    //channelDecimationStageCount = 0;
-    //minimumTunableFrequency = 0;
-    //maximumTunableFrequency = 0;
-    canControl = false;
-    gotDeviceInfo = false;
-    gotSyncInfo = false;
+    //channel_decimation_stage_count = 0;
+    //minimum_tunable_frequency = 0;
+    //maximum_tunable_frequency = 0;
+    can_control = false;
+    got_device_info = false;
+    got_sync_info = false;
 
-    lastSequenceNumber = ((uint32_t)-1);
-    droppedBuffers = 0;
+    last_sequence_number = ((uint32_t)-1);
+    dropped_buffers = 0;
     down_stream_bytes = 0;
 
-    parserPhase = AcquiringHeader;
-    parserPosition = 0;
+    parser_phase = AcquiringHeader;
+    parser_position = 0;
 
     streaming = false;
     terminated = true;
 }
 
 
-void spyserver_source_c::threadLoop() {
-  parserPhase = AcquiringHeader;
-  parserPosition = 0;
+void spyserver_source_c::thread_loop() {
+  parser_phase = AcquiringHeader;
+  parser_position = 0;
 
   char buffer[BufferSize];
   try {
@@ -290,34 +297,33 @@ void spyserver_source_c::threadLoop() {
       if (availableData > 0) {
         availableData = availableData > BufferSize ? BufferSize : availableData;
         client.receive_data(buffer, availableData);
-        parseMessage(buffer, availableData);
+        parse_message(buffer, availableData);
       }
     }
   } catch (std::exception &e) {
     std::cerr << "SpyServer: Error on ThreadLoop: " << e.what() << std::endl;
-    // std::cerr << e.what() << std::endl;
   }
-  if (bodyBuffer != NULL) {
-    delete[] bodyBuffer;
-    bodyBuffer = NULL;
+  if (body_buffer != NULL) {
+    delete[] body_buffer;
+    body_buffer = NULL;
   }
 
   cleanup();
 }
 
-void spyserver_source_c::parseMessage(char *buffer, uint32_t len) {
+void spyserver_source_c::parse_message(char *buffer, uint32_t len) {
   down_stream_bytes++;
 
   int consumed;
   while (len > 0 && !terminated) {
-    if (parserPhase == AcquiringHeader) {
-      while (parserPhase == AcquiringHeader && len > 0) {
-        consumed = parseHeader(buffer, len);
+    if (parser_phase == AcquiringHeader) {
+      while (parser_phase == AcquiringHeader && len > 0) {
+        consumed = parse_header(buffer, len);
         buffer += consumed;
         len -= consumed;
       }
 
-      if (parserPhase == ReadingData) {
+      if (parser_phase == ReadingData) {
         uint8_t client_major = (SPYSERVER_PROTOCOL_VERSION >> 24) & 0xFF;
         uint8_t client_minor = (SPYSERVER_PROTOCOL_VERSION >> 16) & 0xFF;
 
@@ -333,50 +339,50 @@ void spyserver_source_c::parseMessage(char *buffer, uint32_t len) {
           throw std::runtime_error( std::string(__FUNCTION__) + " " + "The server is probably buggy.");
         }
 
-        if (bodyBuffer == NULL || bodyBufferLength < header.BodySize) {
-          if (bodyBuffer != NULL) {
-            delete[] bodyBuffer;
+        if (body_buffer == NULL || body_buffer_length < header.BodySize) {
+          if (body_buffer != NULL) {
+            delete[] body_buffer;
           }
 
-          bodyBuffer = new uint8_t[header.BodySize];
+          body_buffer = new uint8_t[header.BodySize];
         }
       }
     }
 
-    if (parserPhase == ReadingData) {
-      consumed = parseBody(buffer, len);
+    if (parser_phase == ReadingData) {
+      consumed = parse_body(buffer, len);
       buffer += consumed;
       len -= consumed;
 
-      if (parserPhase == AcquiringHeader) {
+      if (parser_phase == AcquiringHeader) {
         if (header.MessageType != MSG_TYPE_DEVICE_INFO && header.MessageType != MSG_TYPE_CLIENT_SYNC) {
-          int32_t gap = header.SequenceNumber - lastSequenceNumber - 1;
-          lastSequenceNumber = header.SequenceNumber;
-          droppedBuffers += gap;
+          int32_t gap = header.SequenceNumber - last_sequence_number - 1;
+          last_sequence_number = header.SequenceNumber;
+          dropped_buffers += gap;
           if (gap > 0) {
             std::cerr << "SpyServer: Lost " << gap << " frames from SpyServer!";
           }
         }
-        handleNewMessage();
+        handle_new_message();
       }
     }
   }
 }
 
-int spyserver_source_c::parseHeader(char *buffer, uint32_t length) {
+int spyserver_source_c::parse_header(char *buffer, uint32_t length) {
   auto consumed = 0;
 
   while (length > 0) {
-    int to_write = std::min((uint32_t)(sizeof(MessageHeader) - parserPosition), length);
-    std::memcpy(&header + parserPosition, buffer, to_write);
+    int to_write = std::min((uint32_t)(sizeof(MessageHeader) - parser_position), length);
+    std::memcpy(&header + parser_position, buffer, to_write);
     length -= to_write;
     buffer += to_write;
-    parserPosition += to_write;
+    parser_position += to_write;
     consumed += to_write;
-    if (parserPosition == sizeof(MessageHeader)) {
-      parserPosition = 0;
+    if (parser_position == sizeof(MessageHeader)) {
+      parser_position = 0;
       if (header.BodySize > 0) {
-        parserPhase = ReadingData;
+        parser_phase = ReadingData;
       }
 
       return consumed;
@@ -386,20 +392,20 @@ int spyserver_source_c::parseHeader(char *buffer, uint32_t length) {
   return consumed;
 }
 
-int spyserver_source_c::parseBody(char* buffer, uint32_t length) {
+int spyserver_source_c::parse_body(char* buffer, uint32_t length) {
   auto consumed = 0;
 
   while (length > 0) {
-    int to_write = std::min((int) header.BodySize - parserPosition, length);
-    std::memcpy(bodyBuffer + parserPosition, buffer, to_write);
+    int to_write = std::min((int) header.BodySize - parser_position, length);
+    std::memcpy(body_buffer + parser_position, buffer, to_write);
     length -= to_write;
     buffer += to_write;
-    parserPosition += to_write;
+    parser_position += to_write;
     consumed += to_write;
 
-    if (parserPosition == header.BodySize) {
-      parserPosition = 0;
-      parserPhase = AcquiringHeader;
+    if (parser_position == header.BodySize) {
+      parser_position = 0;
+      parser_phase = AcquiringHeader;
       return consumed;
     }
   }
@@ -407,8 +413,8 @@ int spyserver_source_c::parseBody(char* buffer, uint32_t length) {
   return consumed;
 }
 
-bool spyserver_source_c::sendCommand(uint32_t cmd, std::vector<uint8_t> args) {
-  if (!isConnected) {
+bool spyserver_source_c::send_command(uint32_t cmd, std::vector<uint8_t> args) {
+  if (!is_connected) {
     return false;
   }
 
@@ -442,72 +448,71 @@ bool spyserver_source_c::sendCommand(uint32_t cmd, std::vector<uint8_t> args) {
   return result;
 }
 
-void spyserver_source_c::handleNewMessage() {
+void spyserver_source_c::handle_new_message() {
   if (terminated) {
     return;
   }
 
   switch (header.MessageType) {
     case MSG_TYPE_DEVICE_INFO:
-      processDeviceInfo();
+      process_device_info();
       break;
     case MSG_TYPE_CLIENT_SYNC:
-      processClientSync();
+      process_client_sync();
       break;
     case MSG_TYPE_UINT8_IQ:
-      processUInt8Samples();
+      process_uint8_samples();
       break;
     case MSG_TYPE_INT16_IQ:
-      processInt16Samples();
+      process_int16_samples();
       break;
     case MSG_TYPE_FLOAT_IQ:
-      processFloatSamples();
+      process_float_samples();
       break;
     case MSG_TYPE_UINT8_FFT:
-      processUInt8FFT();
+      process_uint8_fft();
       break;
     default:
       break;
   }
 }
 
-void spyserver_source_c::processDeviceInfo() {
-  std::memcpy(&deviceInfo, bodyBuffer, sizeof(DeviceInfo));
-  minimumTunableFrequency = deviceInfo.MinimumFrequency;
-  maximumTunableFrequency = deviceInfo.MaximumFrequency;
-  gotDeviceInfo = true;
+void spyserver_source_c::process_device_info() {
+  std::memcpy(&device_info, body_buffer, sizeof(DeviceInfo));
+  minimum_tunable_frequency = device_info.MinimumFrequency;
+  maximum_tunable_frequency = device_info.MaximumFrequency;
+  got_device_info = true;
 }
 
-void spyserver_source_c::processClientSync() {
+void spyserver_source_c::process_client_sync() {
   ClientSync sync;
-  std::memcpy(&sync, bodyBuffer, sizeof(ClientSync));
+  std::memcpy(&sync, body_buffer, sizeof(ClientSync));
 
-  canControl = sync.CanControl != 0;
+  can_control = sync.CanControl != 0;
   gain = (int) sync.Gain;
-  deviceCenterFrequency = sync.DeviceCenterFrequency;
-  channelCenterFrequency = sync.IQCenterFrequency;
-  //displayCenterFrequency = sync.FFTCenterFrequency;
+  device_center_frequency = sync.DeviceCenterFrequency;
+  channel_center_frequency = sync.IQCenterFrequency;
 
-  switch (streamingMode) {
+  switch (streaming_mode) {
   case STREAM_MODE_FFT_ONLY:
   case STREAM_MODE_FFT_IQ:
-    minimumTunableFrequency = sync.MinimumFFTCenterFrequency;
-    maximumTunableFrequency = sync.MaximumFFTCenterFrequency;
+    minimum_tunable_frequency = sync.MinimumFFTCenterFrequency;
+    maximum_tunable_frequency = sync.MaximumFFTCenterFrequency;
     break;
   case STREAM_MODE_IQ_ONLY:
-    minimumTunableFrequency = sync.MinimumIQCenterFrequency;
-    maximumTunableFrequency = sync.MaximumIQCenterFrequency;
+    minimum_tunable_frequency = sync.MinimumIQCenterFrequency;
+    maximum_tunable_frequency = sync.MaximumIQCenterFrequency;
     break;
   }
 
-  gotSyncInfo = true;
+  got_sync_info = true;
 }
 
-void spyserver_source_c::processUInt8Samples() {
+void spyserver_source_c::process_uint8_samples() {
   size_t n_avail, to_copy, num_samples = (header.BodySize) / 2;
   _fifo_lock.lock();
 
-  uint8_t *sample = (uint8_t *)bodyBuffer;
+  uint8_t *sample = (uint8_t *)body_buffer;
 
   n_avail = _fifo->capacity() - _fifo->size();
   to_copy = (n_avail < num_samples ? n_avail : num_samples / 2);
@@ -518,22 +523,20 @@ void spyserver_source_c::processUInt8Samples() {
     sample += 2;
   }
   _fifo_lock.unlock();
-    /* We have made some new samples available to the consumer in work() */
   if (to_copy) {
-    //std::cerr << "+" << std::flush;
     _samp_avail.notify_one();
   }
 
-  /* Indicate overrun, if neccesary */
   if (to_copy < num_samples)
     std::cerr << "O" << std::flush;
 }
 
-void spyserver_source_c::processInt16Samples() {
+void spyserver_source_c::process_int16_samples() {
   size_t n_avail, to_copy, num_samples = (header.BodySize / 2) / 2;
+
   _fifo_lock.lock();
 
-  int16_t *sample = (int16_t *)bodyBuffer;
+  int16_t *sample = (int16_t *)body_buffer;
 
   n_avail = _fifo->capacity() - _fifo->size();
   to_copy = (n_avail < num_samples ? n_avail : num_samples);
@@ -544,22 +547,19 @@ void spyserver_source_c::processInt16Samples() {
     sample += 2;
   }
   _fifo_lock.unlock();
-    /* We have made some new samples available to the consumer in work() */
   if (to_copy) {
-    //std::cerr << "+" << std::flush;
     _samp_avail.notify_one();
   }
 
-  /* Indicate overrun, if neccesary */
   if (to_copy < num_samples)
     std::cerr << "O" << std::flush;
 }
 
-void spyserver_source_c::processFloatSamples() {
+void spyserver_source_c::process_float_samples() {
   size_t n_avail, to_copy, num_samples = (header.BodySize / 4) / 2;
   _fifo_lock.lock();
 
-  float *sample = (float *)bodyBuffer;
+  float *sample = (float *)body_buffer;
 
   n_avail = _fifo->capacity() - _fifo->size();
   to_copy = (n_avail < num_samples ? n_avail : num_samples);
@@ -570,23 +570,23 @@ void spyserver_source_c::processFloatSamples() {
     sample += 2;
   }
   _fifo_lock.unlock();
-    /* We have made some new samples available to the consumer in work() */
   if (to_copy) {
-    //std::cerr << "+" << std::flush;
     _samp_avail.notify_one();
   }
 }
 
-void spyserver_source_c::setStreamState() {
-  setSetting(SETTING_STREAMING_ENABLED, {(unsigned int)(streaming ? 1 : 0)});
+void spyserver_source_c::set_stream_state() {
+  set_setting(SETTING_STREAMING_ENABLED, {(unsigned int)(streaming ? 1 : 0)});
 }
 
 double spyserver_source_c::set_sample_rate(double sampleRate) {
   if (sampleRate <= 0xFFFFFFFF) {
+    std::cerr << "SpyServer: Setting sample rate to " << sampleRate << std::endl;
     for (unsigned int i=0; i<_sample_rates.size(); i++) {
       if (_sample_rates[i].first == sampleRate) {
-              channelDecimationStageCount = i;
-              setSetting(SETTING_IQ_DECIMATION, {channelDecimationStageCount});
+              channel_decimation_stage_count = _sample_rates[i].second;
+              set_setting(SETTING_IQ_DECIMATION, {channel_decimation_stage_count});
+              _sample_rate = sampleRate;
               return get_sample_rate();
       }
     }
@@ -602,15 +602,15 @@ double spyserver_source_c::set_sample_rate(double sampleRate) {
 
 double spyserver_source_c::set_center_freq(double centerFrequency, size_t chan) {
   if (centerFrequency <= 0xFFFFFFFF) {
-    channelCenterFrequency = (uint32_t) centerFrequency;
-    setSetting(SETTING_IQ_FREQUENCY, {channelCenterFrequency});
+    channel_center_frequency = (uint32_t) centerFrequency;
+    set_setting(SETTING_IQ_FREQUENCY, {channel_center_frequency});
     return centerFrequency;
   }
 
   throw std::runtime_error(boost::str( boost::format("Unsupported center frequency: %gM") % (centerFrequency/1e6) ) );
 }
 
-void spyserver_source_c::processUInt8FFT() {
+void spyserver_source_c::process_uint8_fft() {
   // TODO
   // // std::cerr << "UInt8 FFT Samples processing not implemented!!!" << std::endl;
 }
@@ -626,17 +626,18 @@ spyserver_source_c::~spyserver_source_c ()
     delete _fifo;
     _fifo = NULL;
   }
-  delete[] headerData;
-  headerData = NULL;
+  delete[] header_data;
+  header_data = NULL;
 }
 
 bool spyserver_source_c::start()
 {
   if (!streaming) {
-      streaming = true;
-      down_stream_bytes = 0;
-      setStreamState();
-      return true;
+    std::cerr << "SpyServer: Starting Streaming" << std::endl;
+    streaming = true;
+    down_stream_bytes = 0;
+    set_stream_state();
+    return true;
   }
   return false;
 }
@@ -644,10 +645,11 @@ bool spyserver_source_c::start()
 bool spyserver_source_c::stop()
 {
   if (streaming) {
-      streaming = false;
-      down_stream_bytes = 0;
-      setStreamState();
-      return true;
+    std::cerr << "SpyServer: Stopping Streaming" << std::endl;
+    streaming = false;
+    down_stream_bytes = 0;
+    set_stream_state();
+    return true;
   }
   return false;
 }
@@ -696,7 +698,6 @@ size_t spyserver_source_c::get_num_channels()
 osmosdr::meta_range_t spyserver_source_c::get_sample_rates()
 {
   osmosdr::meta_range_t range;
-
   for (size_t i = 0; i < _sample_rates.size(); i++)
     range += osmosdr::range_t( _sample_rates[i].first );
 
@@ -711,8 +712,7 @@ double spyserver_source_c::get_sample_rate()
 osmosdr::freq_range_t spyserver_source_c::get_freq_range( size_t chan )
 {
   osmosdr::freq_range_t range;
-
-  range += osmosdr::range_t( 24e6, 1766e6 );
+  range += osmosdr::range_t( minimum_tunable_frequency, maximum_tunable_frequency );
 
   return range;
 }
@@ -724,16 +724,12 @@ double spyserver_source_c::get_center_freq( size_t chan )
 
 double spyserver_source_c::set_freq_corr( double ppm, size_t chan )
 {
-  _freq_corr = ppm;
-
-  set_center_freq( _center_freq );
-
   return get_freq_corr( chan );
 }
 
 double spyserver_source_c::get_freq_corr( size_t chan )
 {
-  return _freq_corr;
+  return 0;
 }
 
 std::vector<std::string> spyserver_source_c::get_gain_names( size_t chan )
@@ -747,18 +743,12 @@ std::vector<std::string> spyserver_source_c::get_gain_names( size_t chan )
 
 osmosdr::gain_range_t spyserver_source_c::get_gain_range( size_t chan )
 {
-  return osmosdr::gain_range_t( 0, 21, 1 );
+  return osmosdr::gain_range_t( 0, 16, 1 );
 }
 
 osmosdr::gain_range_t spyserver_source_c::get_gain_range( const std::string & name, size_t chan )
 {
-  /* They don't spec any gain values in dB so we simply use gain stage indices for now. */
-
-  if ( "LNA" == name ) {
-    return osmosdr::gain_range_t( 0, 15, 1 );
-  }
-
-  return osmosdr::gain_range_t();
+  return get_gain_range(chan);
 }
 
 bool spyserver_source_c::set_gain_mode( bool automatic, size_t chan )
@@ -768,27 +758,23 @@ bool spyserver_source_c::set_gain_mode( bool automatic, size_t chan )
 
 bool spyserver_source_c::get_gain_mode( size_t chan )
 {
-  return _auto_gain;
+  return false;
 }
 
 double spyserver_source_c::set_gain( double gain, size_t chan )
 {
   _gain = gain;
-  setSetting(SETTING_GAIN, {(uint32_t)gain});
+  set_setting(SETTING_GAIN, {(uint32_t)gain});
   return _gain;
 }
 
-double spyserver_source_c::set_lna_gain( double gain, size_t chan) 
+double spyserver_source_c::set_lna_gain( double gain, size_t chan)
 {
-  return set_gain(gain);
+  return set_gain(gain, chan);
 }
 
 double spyserver_source_c::set_gain( double gain, const std::string & name, size_t chan)
 {
-  if ( "LNA" == name ) {
-    return set_lna_gain( gain, chan );
-  }
-
   return set_gain( gain, chan );
 }
 
@@ -799,21 +785,17 @@ double spyserver_source_c::get_gain( size_t chan )
 
 double spyserver_source_c::get_gain( const std::string & name, size_t chan )
 {
-  if ( "LNA" == name ) {
-    return _gain;
-  }
-
   return get_gain( chan );
 }
 
 double spyserver_source_c::set_mix_gain(double gain, size_t chan)
 {
-  return 0;
+  return _gain;
 }
 
 double spyserver_source_c::set_if_gain(double gain, size_t chan)
 {
-  return 0;
+  return _gain;
 }
 
 std::vector< std::string > spyserver_source_c::get_antennas( size_t chan )
@@ -855,9 +837,9 @@ osmosdr::freq_range_t spyserver_source_c::get_bandwidth_range( size_t chan )
 }
 
 void spyserver_source_c::set_biast( bool enabled ) {
-  // _biasT = enabled;
+
 }
 
 bool spyserver_source_c::get_biast() {
-  return false; // _biasT;
+  return false;
 }

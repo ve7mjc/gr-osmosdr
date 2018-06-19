@@ -33,8 +33,6 @@
 #include "spyserver_protocol.h"
 #include "tcp_client.h"
 
-#define SPYSERVER_SAMPLE_BUFFER_SIZE 256 * 1024
-
 class spyserver_source_c;
 
 /*
@@ -131,8 +129,6 @@ public:
 
 private:
   static constexpr unsigned int BufferSize = 64 * 1024;
-  const int DefaultDisplayPixels = 2000;
-  const int DefaultFFTRange = 127;
   const uint32_t ProtocolVersion = SPYSERVER_PROTOCOL_VERSION;
   const std::string SoftwareID = std::string("gr-osmosdr");
   const std::string NameNoDevice = std::string("SpyServer - No Device");
@@ -141,60 +137,60 @@ private:
   const std::string NameRTLSDR = std::string("SpyServer - RTLSDR");
   const std::string NameUnknown = std::string("SpyServer - Unknown Device");
 
-  uint32_t minimumTunableFrequency;
-  uint32_t maximumTunableFrequency;
-  uint32_t deviceCenterFrequency;
-  uint32_t channelCenterFrequency;
-  uint32_t channelDecimationStageCount;
+  uint32_t minimum_tunable_frequency;
+  uint32_t maximum_tunable_frequency;
+  uint32_t device_center_frequency;
+  uint32_t channel_center_frequency;
+  uint32_t channel_decimation_stage_count;
   int32_t gain;
   tcp_client client;
 
   void connect();
   void disconnect();
-  void threadLoop();
-  bool sayHello();
+  void thread_loop();
+  bool say_hello();
   void cleanup();
-  void onConnect();
+  void on_connect();
 
-  bool setSetting(uint32_t settingType, std::vector<uint32_t> params);
-  bool sendCommand(uint32_t cmd, std::vector<uint8_t> args);
-  void parseMessage(char *buffer, uint32_t len);
-  int parseHeader(char *buffer, uint32_t len);
-  int parseBody(char *buffer, uint32_t len);
-  void processDeviceInfo();
-  void processClientSync();
-  void processUInt8Samples();
-  void processInt16Samples();
-  void processFloatSamples();
-  void processUInt8FFT();
-  void handleNewMessage();
-  void setStreamState();
+  bool set_setting(uint32_t settingType, std::vector<uint32_t> params);
+  bool send_command(uint32_t cmd, std::vector<uint8_t> args);
+  void parse_message(char *buffer, uint32_t len);
+  int parse_header(char *buffer, uint32_t len);
+  int parse_body(char *buffer, uint32_t len);
+  void process_device_info();
+  void process_client_sync();
+  void process_uint8_samples();
+  void process_int16_samples();
+  void process_float_samples();
+  void process_uint8_fft();
+  void handle_new_message();
+  void set_stream_state();
 
   std::atomic_bool terminated;
   std::atomic_bool streaming;
-  std::atomic_bool gotDeviceInfo;
-  std::atomic_bool gotSyncInfo;
-  std::atomic_bool canControl;
-  std::atomic_bool isConnected;
-  std::thread *receiverThread;
+  std::atomic_bool got_device_info;
+  std::atomic_bool got_sync_info;
+  std::atomic_bool can_control;
+  std::atomic_bool is_connected;
+  std::thread *receiver_thread;
 
-  uint32_t droppedBuffers;
+  uint32_t dropped_buffers;
   std::atomic<int64_t> down_stream_bytes;
 
-  uint8_t *headerData;
-  uint8_t *bodyBuffer;
-  uint64_t bodyBufferLength;
-  uint32_t parserPosition;
-  uint32_t lastSequenceNumber;
+  uint8_t *header_data;
+  uint8_t *body_buffer;
+  uint64_t body_buffer_length;
+  uint32_t parser_position;
+  uint32_t last_sequence_number;
 
   std::string ip;
   int port;
 
-  DeviceInfo deviceInfo;
+  DeviceInfo device_info;
   MessageHeader header;
 
-  uint32_t streamingMode;
-  uint32_t parserPhase;
+  uint32_t streaming_mode;
+  uint32_t parser_phase;
 
   boost::circular_buffer<gr_complex> *_fifo;
   boost::mutex _fifo_lock;
@@ -203,8 +199,6 @@ private:
   std::vector< std::pair<double, uint32_t> > _sample_rates;
   double _sample_rate;
   double _center_freq;
-  double _freq_corr;
-  bool _auto_gain;
   double _gain;
 };
 
