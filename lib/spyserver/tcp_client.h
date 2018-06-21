@@ -21,6 +21,7 @@
 #ifndef TCPCLIENT_H_
 #define TCPCLIENT_H_
 
+#include <atomic>
 #include <chrono>
 #include <thread>
 #include <cstdint>
@@ -31,7 +32,6 @@
 
 #ifdef _WIN32
 #   include <winsock2.h>
-#   include <atomic>
 #   include <Ws2tcpip.h>
 #else
 #   include <sys/socket.h>
@@ -52,12 +52,6 @@ private:
     static std::atomic_uint sockCount;
     void socket_initialize();
     #endif
-    union {
-        struct {
-            uint8_t b1, b2, b3, b4;
-        } bytes;
-        uint32_t addr;
-    } address_data;
 protected:
     struct sockaddr_in socketAddr;
     int s;

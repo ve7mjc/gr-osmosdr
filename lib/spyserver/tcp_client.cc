@@ -69,7 +69,6 @@ void tcp_client::socket_initialize() {
 tcp_client::tcp_client(std::string addr, int port)
 {
     this->port = port;
-    char ch;
     #ifdef _WIN32
     socket_initialize();
     #endif
@@ -84,8 +83,6 @@ tcp_client::tcp_client(std::string addr, int port)
 }
 
 void tcp_client::connect_conn() {
-  in_addr a;
-  a.s_addr = address_data.addr;
   s = socket(AF_INET, SOCK_STREAM, 0);
   if (s < 0) {
     throw std::runtime_error("Socket Error Code " + std::to_string(errno));
