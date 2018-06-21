@@ -93,6 +93,10 @@ spyserver_source_c::spyserver_source_c (const std::string &args)
   {
     ip = boost::lexical_cast<std::string>( dict["ip"] );
   }
+  else if (dict.count("host"))
+  {
+    ip = boost::lexical_cast<std::string>( dict["host"] );
+  }
   else
   {
     throw std::runtime_error( std::string(__FUNCTION__) + " " +
@@ -112,11 +116,6 @@ spyserver_source_c::spyserver_source_c (const std::string &args)
   client = tcp_client(ip, port);
 
   connect();
-  set_center_freq( (get_freq_range().start() + get_freq_range().stop()) / 2.0 );
-  set_sample_rate( get_sample_rates().start() );
-
-  set_lna_gain( 8 ); /* preset to a reasonable default (non-GRC use case) */
-
 
   _fifo = new boost::circular_buffer<gr_complex>(5000000);
   if (!_fifo) {
@@ -492,6 +491,7 @@ void spyserver_source_c::process_client_sync() {
   gain = (int) sync.Gain;
   device_center_frequency = sync.DeviceCenterFrequency;
   channel_center_frequency = sync.IQCenterFrequency;
+  _center_freq = (double) sync.IQCenterFrequency;
 
   switch (streaming_mode) {
   case STREAM_MODE_FFT_ONLY:
@@ -683,10 +683,17 @@ int spyserver_source_c::work( int noutput_items,
   return noutput_items;
 }
 
-std::vector<std::string> spyserver_source_c::get_devices()
+std::vector<std::string> spyserver_source_c::get_devices(bool fake)
 {
   std::vector<std::string> devices;
   std::string label;
+  if ( fake )
+  {
+    std::string args = "spyserver=0,host=localhost,port=5555";
+    args += ",label='Spyserver Client'";
+    devices.push_back( args );
+  }
+
   return devices;
 }
 
@@ -763,8 +770,12 @@ bool spyserver_source_c::get_gain_mode( size_t chan )
 
 double spyserver_source_c::set_gain( double gain, size_t chan )
 {
-  _gain = gain;
-  set_setting(SETTING_GAIN, {(uint32_t)gain});
+  if (can_control) {
+    _gain = gain;
+    set_setting(SETTING_GAIN, {(uint32_t)gain});
+  } else {
+    std::cerr << "Spyserver: The server does not allow you to change the gains." << std::endl;
+  }
   return _gain;
 }
 

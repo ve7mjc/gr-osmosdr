@@ -66,6 +66,22 @@ void tcp_client::socket_initialize() {
 }
 #endif
 
+tcp_client::tcp_client(std::string addr, int port)
+{
+    this->port = port;
+    char ch;
+    #ifdef _WIN32
+    socket_initialize();
+    #endif
+    hostent * record = gethostbyname(addr.c_str());
+    if (record == NULL) {
+      throw std::runtime_error( std::string(__FUNCTION__) + " " +
+                              "Cannot resolve: " + addr );
+    }
+    in_addr * address = (in_addr *)record->h_addr;
+    memset(&socketAddr, 0x00, sizeof(sockaddr_in));
+    socketAddr.sin_addr = *address;
+}
 
 void tcp_client::connect_conn() {
   in_addr a;
@@ -77,7 +93,6 @@ void tcp_client::connect_conn() {
   memset(&socketAddr, '\0', sizeof(socketAddr));
 
   socketAddr.sin_family = AF_INET;
-  socketAddr.sin_addr = a;
   socketAddr.sin_port = htons(port);
   int x = connect(s, (struct sockaddr *) &socketAddr, sizeof(socketAddr));
   if (x < 0) {

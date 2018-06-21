@@ -63,21 +63,7 @@ protected:
     int s;
 public:
     tcp_client() {}
-    tcp_client(std::string addr, int port) {
-        this->port = port;
-        char ch;
-        std::stringstream s(addr);
-        int b1, b2, b3, b4;
-        s >> b1 >> ch >> b2 >> ch >> b3 >> ch >> b4;
-        address_data.bytes.b1 = b1;
-        address_data.bytes.b2 = b2;
-        address_data.bytes.b3 = b3;
-        address_data.bytes.b4 = b4;
-        memset(&socketAddr, 0x00, sizeof(sockaddr_in));
-        #ifdef _WIN32
-        socket_initialize();
-        #endif
-    }
+    tcp_client(std::string addr, int port);
     ~tcp_client();
 
     void connect_conn();
