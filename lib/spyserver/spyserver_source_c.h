@@ -23,6 +23,7 @@
 #define INCLUDED_SPYSERVER_SOURCE_C_H
 
 #include <thread>
+#include <atomic>
 #include <boost/circular_buffer.hpp>
 #include <boost/thread/mutex.hpp>
 #include <boost/thread/condition_variable.hpp>
