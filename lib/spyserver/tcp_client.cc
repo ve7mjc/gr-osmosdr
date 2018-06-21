@@ -87,7 +87,6 @@ void tcp_client::connect_conn() {
   if (s < 0) {
     throw std::runtime_error("Socket Error Code " + std::to_string(errno));
   }
-  memset(&socketAddr, '\0', sizeof(socketAddr));
 
   socketAddr.sin_family = AF_INET;
   socketAddr.sin_port = htons(port);
