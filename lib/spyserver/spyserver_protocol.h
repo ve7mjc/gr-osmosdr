@@ -75,12 +75,12 @@ enum StreamingMode
 
 enum StreamFormat
 {
-  STREAM_FORMAT_DINT4       = 0,
+  STREAM_FORMAT_INVALID     = 0,
   STREAM_FORMAT_UINT8       = 1,
   STREAM_FORMAT_INT16       = 2,
   STREAM_FORMAT_INT24       = 3,
   STREAM_FORMAT_FLOAT       = 4,
-  STREAM_FORMAT_COMPRESSED  = 5,
+  STREAM_FORMAT_DINT4       = 5,
 };
 
 enum MessageType
@@ -94,17 +94,14 @@ enum MessageType
   MSG_TYPE_INT16_IQ         = 101,
   MSG_TYPE_INT24_IQ         = 102,
   MSG_TYPE_FLOAT_IQ         = 103,
-  MSG_TYPE_COMPRESSED_IQ    = 104,
 
   MSG_TYPE_UINT8_AF         = 200,
   MSG_TYPE_INT16_AF         = 201,
   MSG_TYPE_INT24_AF         = 202,
   MSG_TYPE_FLOAT_AF         = 203,
-  MSG_TYPE_COMPRESSED_AF    = 204,
 
   MSG_TYPE_DINT4_FFT        = 300,
   MSG_TYPE_UINT8_FFT        = 301,
-  MSG_TYPE_COMPRESSED_FFT   = 302,
 };
 
 struct ClientHandshake
@@ -145,6 +142,9 @@ struct DeviceInfo
   uint32_t MaximumGainIndex;
   uint32_t MinimumFrequency;
   uint32_t MaximumFrequency;
+  uint32_t Resolution;
+  uint32_t MinimumIQDecimation;
+  uint32_t ForcedIQFormat;
 };
 
 struct ClientSync
