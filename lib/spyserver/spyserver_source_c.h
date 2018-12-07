@@ -143,7 +143,6 @@ private:
   uint32_t device_center_frequency;
   uint32_t channel_center_frequency;
   uint32_t channel_decimation_stage_count;
-  int32_t gain;
   tcp_client client;
 
   void connect();
@@ -201,6 +200,7 @@ private:
   double _sample_rate;
   double _center_freq;
   double _gain;
+  double _digitalGain;
 };
 
 #endif /* INCLUDED_SPYSERVER_SOURCE_C_H */

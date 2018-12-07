@@ -85,7 +85,9 @@ spyserver_source_c::spyserver_source_c (const std::string &args)
 
     streaming_mode(STREAM_MODE_IQ_ONLY),
     _sample_rate(0),
-    _center_freq(0)
+    _center_freq(0),
+    _gain(0),
+    _digitalGain(0)
 {
   dict_t dict = params_to_dict(args);
 
@@ -214,8 +216,10 @@ void spyserver_source_c::on_connect()
   //set_setting(SETTING_FFT_DB_RANGE, { fftRange });
   //device_info.MaximumSampleRate
   //availableSampleRates
-  for (unsigned int i=0; i<=device_info.DecimationStageCount; i++) {
-    _sample_rates.push_back( std::pair<double, uint32_t>(device_info.MaximumSampleRate / (double)(1 << i), i ) );
+  std::cerr << "SpyServer: Maximum Sample Rate: " << device_info.MaximumSampleRate << std::endl;
+  for (unsigned int i = device_info.MinimumIQDecimation; i<=device_info.DecimationStageCount; i++) {
+    uint32_t sr = device_info.MaximumSampleRate / (1 << i);
+    _sample_rates.push_back( std::pair<double, uint32_t>((double)sr, i ) );
   }
   std::sort(_sample_rates.begin(), _sample_rates.end());
 }
@@ -259,7 +263,8 @@ void spyserver_source_c::cleanup() {
     device_info.MinimumFrequency = 0;
     device_info.MaximumFrequency = 0;
 
-    gain = 0;
+    _gain = 0;
+    _digitalGain = 0;
     //displayCenterFrequency = 0;
     //device_center_frequency = 0;
     //displayDecimationStageCount = 0;
@@ -488,7 +493,7 @@ void spyserver_source_c::process_client_sync() {
   std::memcpy(&sync, body_buffer, sizeof(ClientSync));
 
   can_control = sync.CanControl != 0;
-  gain = (int) sync.Gain;
+  _gain = (double) sync.Gain;
   device_center_frequency = sync.DeviceCenterFrequency;
   channel_center_frequency = sync.IQCenterFrequency;
   _center_freq = (double) sync.IQCenterFrequency;
@@ -744,8 +749,10 @@ double spyserver_source_c::get_freq_corr( size_t chan )
 std::vector<std::string> spyserver_source_c::get_gain_names( size_t chan )
 {
   std::vector< std::string > names;
-
-  names += "LNA";
+  if (can_control) {
+    names += "LNA";
+  }
+  names += "Digital";
 
   return names;
 }
@@ -757,6 +764,9 @@ osmosdr::gain_range_t spyserver_source_c::get_gain_range( size_t chan )
 
 osmosdr::gain_range_t spyserver_source_c::get_gain_range( const std::string & name, size_t chan )
 {
+  if (name == "Digital") {
+    return osmosdr::gain_range_t( 0, 1, 1 );
+  }
   return get_gain_range(chan);
 }
 
@@ -778,6 +788,7 @@ double spyserver_source_c::set_gain( double gain, size_t chan )
   } else {
     std::cerr << "Spyserver: The server does not allow you to change the gains." << std::endl;
   }
+
   return _gain;
 }
 
@@ -788,17 +799,27 @@ double spyserver_source_c::set_lna_gain( double gain, size_t chan)
 
 double spyserver_source_c::set_gain( double gain, const std::string & name, size_t chan)
 {
-  return set_gain( gain, chan );
+  if (name == "Digital") {
+    _digitalGain = gain;
+    set_setting(SETTING_IQ_DIGITAL_GAIN, {((uint32_t)gain) * 0xFFFFFFFF});
+    return _gain;
+  }
+  return set_gain(gain, chan);
 }
 
 double spyserver_source_c::get_gain( size_t chan )
 {
+  return chan == 0 ? _gain : _digitalGain;
   return _gain;
 }
 
 double spyserver_source_c::get_gain( const std::string & name, size_t chan )
 {
-  return get_gain( chan );
+
+  if (name == "Digital") {
+    return _digitalGain;
+  }
+  return get_gain(chan);
 }
 
 double spyserver_source_c::set_mix_gain(double gain, size_t chan)

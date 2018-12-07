@@ -11,7 +11,7 @@ Copyright (C) 2017 Youssef Touil youssef@live.com
 #include <stdint.h>
 #include <limits.h>
 
-#define SPYSERVER_PROTOCOL_VERSION (((2) << 24) | ((0) << 16) | (1558))
+#define SPYSERVER_PROTOCOL_VERSION (((2) << 24) | ((0) << 16) | (1700))
 
 #define SPYSERVER_MAX_COMMAND_BODY_SIZE (256)
 #define SPYSERVER_MAX_MESSAGE_BODY_SIZE (1 << 20)
@@ -46,6 +46,7 @@ enum SettingType
   SETTING_IQ_FORMAT             = 100,
   SETTING_IQ_FREQUENCY          = 101,
   SETTING_IQ_DECIMATION         = 102,
+  SETTING_IQ_DIGITAL_GAIN       = 103,
 
   SETTING_FFT_FORMAT            = 200,
   SETTING_FFT_FREQUENCY         = 201,
