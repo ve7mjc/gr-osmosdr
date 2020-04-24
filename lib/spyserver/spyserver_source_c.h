@@ -92,6 +92,8 @@ public:
 
   size_t get_num_channels( void );
 
+  bool can_control( void );
+
   osmosdr::meta_range_t get_sample_rates( void );
   double set_sample_rate( double rate );
   double get_sample_rate( void );
@@ -170,7 +172,7 @@ private:
   std::atomic_bool streaming;
   std::atomic_bool got_device_info;
   std::atomic_bool got_sync_info;
-  std::atomic_bool can_control;
+  std::atomic_bool _can_control;
   std::atomic_bool is_connected;
   std::thread *receiver_thread;
 
@@ -194,6 +196,7 @@ private:
 
   boost::circular_buffer<gr_complex> *_fifo;
   boost::mutex _fifo_lock;
+  boost::unique_lock<boost::mutex> *lock;
   boost::condition_variable _samp_avail;
 
   std::vector< std::pair<double, uint32_t> > _sample_rates;

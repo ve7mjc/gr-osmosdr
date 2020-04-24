@@ -85,6 +85,8 @@ private:
 
   size_t get_num_channels( void );
 
+  bool can_control( void );
+
   osmosdr::meta_range_t get_sample_rates( void );
   double set_sample_rate( double rate );
   double get_sample_rate( void );

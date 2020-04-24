@@ -38,6 +38,8 @@ public:
 
   size_t get_num_channels( void );
 
+  bool can_control( void ) { return true; }
+
   bool seek( long seek_point, int whence, size_t chan );
 
   osmosdr::meta_range_t get_sample_rates( void );

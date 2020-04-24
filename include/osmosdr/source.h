@@ -67,6 +67,8 @@ public:
    */
   virtual bool seek( long seek_point, int whence, size_t chan = 0 ) = 0;
 
+  virtual bool can_control ( void ) = 0;
+
   /*!
    * Get the possible sample rates for the underlying radio hardware.
    * \return a range of rates in Sps

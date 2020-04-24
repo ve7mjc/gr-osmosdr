@@ -291,7 +291,12 @@ std::vector<std::string> osmosdr_src_c::get_devices()
 
 size_t osmosdr_src_c::get_num_channels()
 {
-  return 1;
+    return 1;
+}
+
+bool osmosdr_src_c::can_control()
+{
+    return true;
 }
 
 osmosdr::meta_range_t osmosdr_src_c::get_sample_rates()

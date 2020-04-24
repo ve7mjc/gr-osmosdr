@@ -89,6 +89,10 @@ spyserver_source_c::spyserver_source_c (const std::string &args)
     _gain(0),
     _digitalGain(0)
 {
+
+    // trying something
+    lock = new boost::unique_lock<boost::mutex>(_fifo_lock);
+
   dict_t dict = params_to_dict(args);
 
   if (dict.count("ip"))
@@ -142,6 +146,10 @@ spyserver_source_c::spyserver_source_c (const std::string &args)
 //   }
 // }
 
+// Connect TCP Socket to Spyserver
+// Spawn new thread calling thread_loop()
+// Wait 1000 msec for Sync Info
+// Call on_connect() to initialize Spyserver
 void spyserver_source_c::connect()
 {
   bool hasError = false;
@@ -157,14 +165,19 @@ void spyserver_source_c::connect()
   say_hello();
   cleanup();
 
+  _can_control = false;
   terminated = false;
   got_sync_info = false;
   got_device_info = false;
 
   std::exception error;
 
+  // spawn new thread calling ::thread_loop function
   receiver_thread  = new std::thread(&spyserver_source_c::thread_loop, this);
 
+  // loop until we get sync_info from Spyserver for 1000 rounds (1 second)
+  // call on_connect() and return if we receive sync_info
+  // disconnect and throw error if we do not receive it
   for (int i=0; i<1000 && !hasError; i++) {
     if (got_device_info) {
       if (device_info.DeviceType == DEVICE_INVALID) {
@@ -205,7 +218,8 @@ void spyserver_source_c::disconnect()
   cleanup();
 }
 
-
+// Spyserver Initialization
+// called when we have received Sync Info from the Server
 void spyserver_source_c::on_connect()
 {
   set_setting(SETTING_STREAMING_MODE, { streaming_mode });
@@ -271,7 +285,7 @@ void spyserver_source_c::cleanup() {
     //channel_decimation_stage_count = 0;
     //minimum_tunable_frequency = 0;
     //maximum_tunable_frequency = 0;
-    can_control = false;
+    _can_control = false;
     got_device_info = false;
     got_sync_info = false;
 
@@ -287,6 +301,9 @@ void spyserver_source_c::cleanup() {
 }
 
 
+// Loop until (bool)terminated true
+// receive data from TCP Socket into (char) buffer[64 * 1024]
+// Call parse_message(buffer, buffer_len)
 void spyserver_source_c::thread_loop() {
   parser_phase = AcquiringHeader;
   parser_position = 0;
@@ -303,6 +320,7 @@ void spyserver_source_c::thread_loop() {
         client.receive_data(buffer, availableData);
         parse_message(buffer, availableData);
       }
+      std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
   } catch (std::exception &e) {
     std::cerr << "SpyServer: Error on ThreadLoop: " << e.what() << std::endl;
@@ -315,6 +333,8 @@ void spyserver_source_c::thread_loop() {
   cleanup();
 }
 
+// while buffer_len > 0
+// Call handle_new_message()
 void spyserver_source_c::parse_message(char *buffer, uint32_t len) {
   down_stream_bytes++;
 
@@ -452,6 +472,7 @@ bool spyserver_source_c::send_command(uint32_t cmd, std::vector<uint8_t> args) {
   return result;
 }
 
+// Divert processing of new message based on header.MessageType
 void spyserver_source_c::handle_new_message() {
   if (terminated) {
     return;
@@ -492,7 +513,7 @@ void spyserver_source_c::process_client_sync() {
   ClientSync sync;
   std::memcpy(&sync, body_buffer, sizeof(ClientSync));
 
-  can_control = sync.CanControl != 0;
+  _can_control = sync.CanControl != 0;
   _gain = (double) sync.Gain;
   device_center_frequency = sync.DeviceCenterFrequency;
   channel_center_frequency = sync.IQCenterFrequency;
@@ -536,9 +557,15 @@ void spyserver_source_c::process_uint8_samples() {
     std::cerr << "O" << std::flush;
 }
 
+// Lock boost::mutex _fifo_lock
+// push body_buffer data of size ((header.BodySize / 2) / 2) onto _fifo.
+// If (size_t)to_copy, call boost::condition_variable _samp_avail.notify_one()
+// If more samples available than designated to copy, indicate an Overflow into console
 void spyserver_source_c::process_int16_samples() {
   size_t n_avail, to_copy, num_samples = (header.BodySize / 2) / 2;
 
+  // boost::mutex _fifo_lock;
+  // we are running in the thread::thread_loop
   _fifo_lock.lock();
 
   int16_t *sample = (int16_t *)body_buffer;
@@ -552,7 +579,11 @@ void spyserver_source_c::process_int16_samples() {
     sample += 2;
   }
   _fifo_lock.unlock();
+
   if (to_copy) {
+    // boost::condition_variable _samp_avail;
+    // If any threads are waiting on *this, calling notify_one unblocks one of the waiting threads
+    // boost::lock_guard<boost::mutex> lock(_fifo_lock);
     _samp_avail.notify_one();
   }
 
@@ -575,9 +606,9 @@ void spyserver_source_c::process_float_samples() {
     sample += 2;
   }
   _fifo_lock.unlock();
-  if (to_copy) {
-    _samp_avail.notify_one();
-  }
+   if (to_copy) {
+     _samp_avail.notify_one();
+   }
 }
 
 void spyserver_source_c::set_stream_state() {
@@ -670,15 +701,13 @@ int spyserver_source_c::work( int noutput_items,
   if ( ! streaming )
     return WORK_DONE;
 
-  boost::unique_lock<boost::mutex> lock(_fifo_lock);
+    /* Wait until we have the requested number of samples */
+    int n_samples_avail = _fifo->size();
 
-  /* Wait until we have the requested number of samples */
-  int n_samples_avail = _fifo->size();
-
-  while (n_samples_avail < noutput_items) {
-    _samp_avail.wait(lock);
-    n_samples_avail = _fifo->size();
-  }
+    while (n_samples_avail < noutput_items) {
+        _samp_avail.wait(*lock);
+        n_samples_avail = _fifo->size();
+    }
 
   for(int i = 0; i < noutput_items; ++i) {
     out[i] = _fifo->at(0);
@@ -706,7 +735,12 @@ std::vector<std::string> spyserver_source_c::get_devices(bool fake)
 
 size_t spyserver_source_c::get_num_channels()
 {
-  return 1;
+    return 1;
+}
+
+bool spyserver_source_c::can_control()
+{
+    return _can_control;
 }
 
 osmosdr::meta_range_t spyserver_source_c::get_sample_rates()
@@ -749,7 +783,7 @@ double spyserver_source_c::get_freq_corr( size_t chan )
 std::vector<std::string> spyserver_source_c::get_gain_names( size_t chan )
 {
   std::vector< std::string > names;
-  if (can_control) {
+  if (_can_control) {
     names += "LNA";
   }
   names += "Digital";
@@ -782,7 +816,7 @@ bool spyserver_source_c::get_gain_mode( size_t chan )
 
 double spyserver_source_c::set_gain( double gain, size_t chan )
 {
-  if (can_control) {
+  if (_can_control) {
     _gain = gain;
     set_setting(SETTING_GAIN, {(uint32_t)gain});
   } else {

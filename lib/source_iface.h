@@ -67,6 +67,8 @@ public:
    */
   virtual double get_sample_rate( void ) = 0;
 
+    virtual bool can_control ( void ) { return false; }
+
   /*!
    * Get the tunable frequency range for the underlying radio hardware.
    * \param chan the channel index 0 to N-1
